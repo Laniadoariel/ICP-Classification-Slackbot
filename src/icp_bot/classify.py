@@ -96,6 +96,7 @@ def _company_size_match(icp_range: str, predicted_size: str) -> bool:
         "mid-market": (100, 1000),
         "mid market": (100, 1000),
         "enterprise": (1000, 1000000),
+        "large": (1000, 1000000),
     }
     for k, (mn, mx) in cat_map.items():
         if k in p:
@@ -104,6 +105,40 @@ def _company_size_match(icp_range: str, predicted_size: str) -> bool:
                 return False
             return not (mx < icp_mn or mn > icp_mx)
     return False
+
+
+def _normalize_company_size_label(raw: str) -> str:
+    """
+    Normalize company size output to one of:
+    - Small
+    - Mid-market
+    - Large
+    """
+    s = (raw or "").strip()
+    if not s:
+        return "Unknown"
+
+    low = _norm(s)
+    if low in {"unknown", "not sure", "n/a"}:
+        return "Unknown"
+
+    # Already categorical?
+    if "mid-market" in low or "mid market" in low:
+        return "Mid-market"
+    if "small" in low or "smb" in low or "startup" in low:
+        return "Small"
+    if "enterprise" in low or "large" in low:
+        return "Large"
+
+    # Numeric → category
+    mn, mx = _parse_range(s)
+    if mn is None or mx is None:
+        return "Unknown"
+    if mn >= 1000 or mx >= 1000:
+        return "Large"
+    if mn >= 100 or mx >= 100:
+        return "Mid-market"
+    return "Small"
 
 
 def _compute_criteria(*, icp_definition: Dict[str, Any], industry: str, company_size: str, geography: str, tech_stack_signal: str) -> Dict[str, bool]:
@@ -208,7 +243,7 @@ def _build_prompt(icp_definition: Dict[str, Any], scraped_text: str) -> tuple[st
         '  "tier": 1|2|3,\n'
         '  "company_name": "string",\n'
         '  "industry": "string (best guess, or \\"Unknown\\")",\n'
-        '  "company_size": "string (best guess, or \\"Unknown\\")",\n'
+        '  "company_size": "one of [\\"Small\\", \\"Mid-market\\", \\"Large\\", \\"Unknown\\"]",\n'
         f'  "geography": "one of {GEO_OPTIONS} (best guess, or \\"Unknown\\")",\n'
         '  "buying_signals": ["short signal", "..."],\n'
         '  "tech_stack_signal": "string (e.g., \\"Salesforce\\", \\"HubSpot\\", \\"Not detected\\")",\n'
@@ -264,7 +299,7 @@ def classify_company(
 
     company_name = str(data.get("company_name") or "Unknown")
     industry = str(data.get("industry") or "Unknown")
-    company_size = str(data.get("company_size") or "Unknown")
+    company_size = _normalize_company_size_label(str(data.get("company_size") or "Unknown"))
     geography = str(data.get("geography") or "Unknown")
     if _norm(geography) in {"unknown", "not sure", "n/a"}:
         geography = _infer_geography(scraped_text=scraped_text, source_url=source_url)

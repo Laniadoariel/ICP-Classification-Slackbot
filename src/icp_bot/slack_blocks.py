@@ -14,9 +14,9 @@ def _clamp_text(s: str, *, max_len: int) -> str:
 
 def _tier_label(tier: int) -> str:
     return {
-        1: "Tier 1 — Strong Fit",
-        2: "Tier 2 — Potential Fit",
-        3: "Tier 3 — Not a Fit",
+        1: "Tier 1",
+        2: "Tier 2",
+        3: "Tier 3",
     }.get(tier, f"Tier {tier}")
 
 
