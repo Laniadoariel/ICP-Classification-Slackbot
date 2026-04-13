@@ -101,6 +101,7 @@ if static_dir.exists():
 
 @app.on_event("startup")
 def _startup() -> None:
+    # Ensure the SQLite schema exists before serving requests.
     settings = load_settings()
     db_path = os.getenv("SQLITE_PATH", "data/icp.db")
     conn = connect(db_path)
@@ -116,7 +117,8 @@ def icp_form(request: Request):
     pools = keyword_pools(conn)
     conn.close()
 
-    # Always render an empty form (even if an active ICP exists in DB).
+    # UX choice: this page is "create/update" but we keep the form empty so
+    # users don't accidentally treat the current DB value as a suggested default.
     icp = {
         "industry": "",
         "company_size_range": "",
@@ -170,6 +172,7 @@ def save_icp(
 
 @app.get("/history", response_class=HTMLResponse)
 def history(request: Request, q: str = "", tier: Optional[str] = None):
+    # The dropdown submits tier="" for "All tiers". Parse safely to avoid 422s.
     tier_int: Optional[int] = None
     try:
         t = (tier or "").strip()

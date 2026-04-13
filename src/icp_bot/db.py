@@ -57,7 +57,7 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
-    # Lightweight migration for older DBs
+    # Lightweight migration: keep existing local DBs working across updates.
     cols = {r["name"] for r in conn.execute("PRAGMA table_info(classifications)").fetchall()}
     if "triggered_by_name" not in cols:
         cur.execute("ALTER TABLE classifications ADD COLUMN triggered_by_name TEXT")
@@ -106,6 +106,7 @@ def upsert_active_icp(
     exclusion_keywords: List[str],
 ) -> None:
     now = _utc_now_iso()
+    # Keep history of ICP versions, but only one row is active at any time.
     conn.execute("UPDATE icp_definition SET is_active = 0 WHERE is_active = 1")
     conn.execute(
         """
@@ -170,6 +171,7 @@ def search_classifications(
     params: List[Any] = []
 
     if q:
+        # Search across URL, company name, and Slack user fields.
         where.append(
             "("
             "url LIKE ? OR "

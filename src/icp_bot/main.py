@@ -16,6 +16,8 @@ from .slack_blocks import build_error_blocks, build_result_blocks
 from .url_parse import extract_first_url, normalize_base_url
 
 
+# Slack requires we acknowledge events quickly (<= 3s). We offload the
+# potentially slow work (HTTP scraping + OpenAI call) to a background thread.
 executor = ThreadPoolExecutor(max_workers=4)
 
 def _fallback_company_name_from_url(base_url: str) -> str:
@@ -36,11 +38,11 @@ def main() -> None:
     settings = load_settings()
     logging.getLogger("icp_bot").info("Startup config: OPENAI_MODEL=%s", settings.openai_model)
 
-    # Initialize DB. (Optionally) seed ICP once at startup.
+    # Ensure DB schema exists before handling any Slack events.
     conn = connect(settings.sqlite_path)
     init_db(conn)
     if settings.seed_icp_on_startup and not get_active_icp(conn):
-        # Seed from local config file to keep the app runnable.
+        # Optional convenience for first run: seed a default ICP into SQLite.
         seed = settings.icp_definition or {}
         upsert_active_icp(
             conn,
@@ -56,6 +58,7 @@ def main() -> None:
 
     @app.event("app_mention")
     def handle_mention(event, say, ack, logger):
+        # Acknowledge immediately; everything else runs async.
         ack()  # must ack within 3 seconds
 
         text = event.get("text", "") or ""
@@ -77,6 +80,8 @@ def main() -> None:
                 scraped = scrape_site(base_url).combined_text
                 conn2 = connect(settings.sqlite_path)
                 init_db(conn2)
+                # Read the active ICP at classification-time so portal changes
+                # take effect immediately without restarting the bot.
                 icp_from_db = get_active_icp(conn2) or settings.icp_definition
                 result = classify_company(
                     openai_api_key=settings.openai_api_key,
@@ -85,6 +90,8 @@ def main() -> None:
                     scraped_text=scraped,
                 )
                 if not (result.company_name or "").strip() or (result.company_name or "").strip().lower() == "unknown":
+                    # Some sites don't clearly state the company name. Use the
+                    # domain as a consistent fallback for history + Slack output.
                     result = result.__class__(  # type: ignore[misc]
                         **{**result.__dict__, "company_name": _fallback_company_name_from_url(base_url)}
                     )

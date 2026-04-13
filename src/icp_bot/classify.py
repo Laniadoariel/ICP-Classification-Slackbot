@@ -152,6 +152,9 @@ def _build_prompt(icp_definition: Dict[str, Any], scraped_text: str) -> tuple[st
         "  }\n"
         "}\n"
         "Guidelines:\n"
+        # We still request a tier for completeness, but we compute the final
+        # Tier 1/2/3 deterministically from the criteria matches to avoid
+        # inconsistent booleans/tier combos from the model.
         "- If unsure, prefer tier 3.\n"
         "- Keep reasoning to 3-6 short bullets.\n"
         "- buying_signals should be 0-5 items.\n"
@@ -195,7 +198,7 @@ def classify_company(
     buying_signals = list(data.get("buying_signals") or [])
     tech_stack_signal = str(data.get("tech_stack_signal") or "Not detected")
     reasoning = list(data.get("reasoning") or [])
-    # Compute criteria deterministically from the saved ICP + extracted fields
+    # We compute criteria deterministically from the saved ICP + extracted fields
     # (the model's internal boolean flags can be inconsistent).
     criteria = _compute_criteria(
         icp_definition=icp_definition,
@@ -204,6 +207,7 @@ def classify_company(
         geography=geography,
         tech_stack_signal=tech_stack_signal,
     )
+    # Final tier is derived from the criteria matches.
     tier = _compute_tier(criteria)
 
     return Classification(

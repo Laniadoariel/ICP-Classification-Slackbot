@@ -61,7 +61,7 @@ def _extract_visible_text(html: str) -> str:
     for tag in soup(["script", "style", "noscript"]):
         tag.decompose()
 
-    # Try to minimize boilerplate
+    # Try to minimize boilerplate so the LLM sees the "main" content.
     for tag in soup(["nav", "footer", "header", "aside"]):
         tag.decompose()
 
@@ -102,7 +102,7 @@ def scrape_site(base_url: str) -> ScrapeResult:
     attempted: List[Tuple[str, str]] = []
     chunks: List[str] = []
 
-    # 1) Homepage (required)
+    # 1) Homepage (required). If we cannot connect, treat the whole site as unreachable.
     homepage_url = urljoin(base_url.rstrip("/") + "/", "")
     html, status = _fetch_html(homepage_url)
     attempted.append((homepage_url, status))
@@ -117,7 +117,7 @@ def scrape_site(base_url: str) -> ScrapeResult:
         else:
             attempted[-1] = (homepage_url, "no_text_extracted")
 
-    # 2) Optional pages: /about, /pricing
+    # 2) Optional pages: /about, /pricing (best-effort)
     for path in ("/about", "/pricing"):
         url = urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
         html2, status2 = _fetch_html(url)
@@ -131,6 +131,8 @@ def scrape_site(base_url: str) -> ScrapeResult:
         chunks.append(f"URL: {url}\n{text2}")
 
     if not chunks:
+        # We connected, but didn't get readable text (or were blocked).
+        # We intentionally keep the error kinds coarse for user-friendly messaging.
         statuses = [s for (_, s) in attempted]
         if any(s == "no_text_extracted" for s in statuses):
             kind = "unscrapable"
