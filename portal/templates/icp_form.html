@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ICP Management Portal</title>
+    <link rel="stylesheet" href="/static/styles.css?v=3" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <div>
+          <h1>ICP Management</h1>
+          <p class="sub">Update the active ICP without redeploying.</p>
+        </div>
+        <nav class="nav">
+          <a class="nav-link active" href="/">ICP</a>
+          <a class="nav-link" href="/history">History</a>
+        </nav>
+      </header>
+
+      <main class="card">
+        <h2>Active ICP definition</h2>
+        <p class="hint">This form opens empty by default.</p>
+
+        <form method="post" action="/icp" class="form">
+          <div class="grid">
+            <label>
+              <span>Industry</span>
+              <input name="industry" required value="{{ icp.industry }}" placeholder="e.g., B2B SaaS" />
+            </label>
+
+            <label>
+              <span>Company size range</span>
+              <input
+                name="company_size_range"
+                required
+                value="{{ icp.company_size_range }}"
+                placeholder="e.g., 100-1000 (or 100: for 0-100)"
+              />
+            </label>
+
+            <label class="span2">
+              <span>Geography</span>
+              <select name="geography" required>
+                <option value="" {% if not icp.geography %}selected{% endif %} disabled>Select geography…</option>
+                {% for opt in geo_options %}
+                  <option value="{{ opt }}" {% if icp.geography == opt %}selected{% endif %}>{{ opt }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+
+          <div class="grid">
+            <label class="span2">
+              <span>Keywords to look for</span>
+              <div class="chip-input" data-name="keywords" data-pool="keyword_pool">
+                <div class="chip-list" aria-label="Keywords"></div>
+                <input class="chip-text" type="text" placeholder="Type a keyword and press Enter" list="keyword_pool_list" />
+                <textarea name="keywords" class="chip-hidden" hidden></textarea>
+              </div>
+              <datalist id="keyword_pool_list">
+                {% for w in keyword_pool %}
+                  <option value="{{ w }}"></option>
+                {% endfor %}
+              </datalist>
+            </label>
+          </div>
+
+          <div class="grid">
+            <label class="span2">
+              <span>Exclusion keywords</span>
+              <div class="chip-input" data-name="exclusion_keywords" data-pool="exclusion_pool">
+                <div class="chip-list" aria-label="Exclusion keywords"></div>
+                <input class="chip-text" type="text" placeholder="Type a keyword and press Enter" list="exclusion_pool_list" />
+                <textarea name="exclusion_keywords" class="chip-hidden" hidden></textarea>
+              </div>
+              <datalist id="exclusion_pool_list">
+                {% for w in exclusion_pool %}
+                  <option value="{{ w }}"></option>
+                {% endfor %}
+              </datalist>
+            </label>
+          </div>
+
+          <div class="actions">
+            <button type="submit">Save ICP</button>
+          </div>
+        </form>
+      </main>
+    </div>
+
+    <script type="application/json" id="initialIcpJson">{{ {"keywords": icp.keywords, "exclusion_keywords": icp.exclusion_keywords} | tojson }}</script>
+    <script>
+      const initial = JSON.parse(document.getElementById("initialIcpJson").textContent || "{}");
+
+      function listLabel(name) {
+        return name === "exclusion_keywords" ? "Exclusion keywords" : "Keywords to look for";
+      }
+
+      function showConflictModal(message, { onCancel, onOverride }) {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay";
+        overlay.innerHTML = `
+          <div class="modal" role="dialog" aria-modal="true">
+            <div class="modal-title">Keyword already exists</div>
+            <div class="modal-body"></div>
+            <div class="modal-actions">
+              <button type="button" class="modal-btn secondary">Cancel</button>
+              <button type="button" class="modal-btn primary">Override</button>
+            </div>
+          </div>
+        `;
+        overlay.querySelector(".modal-body").textContent = message;
+
+        const close = () => overlay.remove();
+        overlay.addEventListener("click", (e) => {
+          if (e.target === overlay) close();
+        });
+        overlay.querySelector(".secondary").addEventListener("click", () => {
+          close();
+          onCancel?.();
+        });
+        overlay.querySelector(".primary").addEventListener("click", () => {
+          close();
+          onOverride?.();
+        });
+        document.body.appendChild(overlay);
+      }
+
+      function normalizeToken(s) {
+        return (s || "").trim().replace(/\s+/g, " ");
+      }
+
+      // Keep references so we can prevent overlaps between the two fields.
+      const chipControllers = {};
+
+      function setupChipInput(root) {
+        const name = root.dataset.name;
+        const listEl = root.querySelector(".chip-list");
+        const inputEl = root.querySelector(".chip-text");
+        const hiddenEl = root.querySelector(".chip-hidden");
+
+        let tokens = [];
+        function render() {
+          listEl.innerHTML = "";
+          tokens.forEach((t, idx) => {
+            const chip = document.createElement("span");
+            chip.className = "chip";
+            const label = document.createElement("span");
+            label.className = "chip-label";
+            label.textContent = t;
+
+            const x = document.createElement("button");
+            x.type = "button";
+            x.className = "chip-x";
+            x.setAttribute("aria-label", "Remove");
+            x.textContent = "×";
+            x.dataset.idx = String(idx);
+            x.addEventListener("click", (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              const i = Number(x.dataset.idx);
+              if (Number.isFinite(i) && i >= 0 && i < tokens.length) {
+                tokens.splice(i, 1);
+                sync();
+                render();
+              }
+            });
+
+            chip.appendChild(label);
+            chip.appendChild(x);
+            listEl.appendChild(chip);
+          });
+        }
+
+        function sync() {
+          hiddenEl.value = tokens.join("\n");
+        }
+
+        function removeByLower(lower) {
+          const before = tokens.length;
+          tokens = tokens.filter((x) => x.toLowerCase() !== lower);
+          if (tokens.length !== before) {
+            sync();
+            render();
+          }
+        }
+
+        function addToken(raw) {
+          const t = normalizeToken(raw);
+          if (!t) return;
+          const key = t.toLowerCase();
+          if (tokens.some((x) => x.toLowerCase() === key)) return;
+
+          const otherName = name === "exclusion_keywords" ? "keywords" : "exclusion_keywords";
+          const other = chipControllers[otherName];
+          const otherHas = other?.hasLower?.(key);
+          if (otherHas) {
+            const msg = `Keyword in ${listLabel(otherName)} already.`;
+            showConflictModal(msg, {
+              onCancel: () => {},
+              onOverride: () => {
+                other.removeByLower(key);
+                tokens.push(t);
+                sync();
+                render();
+              },
+            });
+            return;
+          }
+
+          tokens.push(t);
+          sync();
+          render();
+        }
+
+        inputEl.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === ",") {
+            e.preventDefault();
+            addToken(inputEl.value);
+            inputEl.value = "";
+          }
+          if (e.key === "Backspace" && !inputEl.value && tokens.length) {
+            tokens.pop();
+            sync();
+            render();
+          }
+        });
+
+        // Seed initial values
+        (initial[name] || []).forEach(addToken);
+        sync();
+        render();
+
+        chipControllers[name] = {
+          removeByLower,
+          hasLower: (lower) => tokens.some((x) => x.toLowerCase() === lower),
+        };
+      }
+
+      document.querySelectorAll(".chip-input").forEach(setupChipInput);
+
+      // Company size: if user types "100:" or "100" without '-', auto convert to 0-100 on blur.
+      const sizeInput = document.querySelector('input[name="company_size_range"]');
+      if (sizeInput) {
+        sizeInput.addEventListener("blur", () => {
+          const raw = (sizeInput.value || "").trim();
+          const compact = raw.replace(/\s+/g, "");
+          if (!compact.includes("-")) {
+            const m = compact.match(/^(\d+):?$/);
+            if (m) sizeInput.value = `0-${m[1]}`;
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
+

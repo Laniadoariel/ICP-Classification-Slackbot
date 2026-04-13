@@ -1,0 +1,19 @@
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+env/
+.env.*
+
+# Local database / generated data
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# Editor/OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

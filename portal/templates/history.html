@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>ICP History</title>
+    <link rel="stylesheet" href="/static/styles.css?v=3" />
+  </head>
+  <body>
+    <div class="container">
+      <header class="header">
+        <div>
+          <h1>Classification history</h1>
+          <p class="sub">Search by URL, company name, or Slack user.</p>
+        </div>
+        <nav class="nav">
+          <a class="nav-link" href="/">ICP</a>
+          <a class="nav-link active" href="/history">History</a>
+        </nav>
+      </header>
+
+      <main class="card">
+        <form method="get" action="/history" class="toolbar">
+          <input name="q" value="{{ q }}" placeholder="Search (URL / Company / Slack user)" />
+          <select name="tier">
+            <option value="" {% if tier == "" %}selected{% endif %}>All tiers</option>
+            <option value="1" {% if tier == 1 %}selected{% endif %}>Tier 1</option>
+            <option value="2" {% if tier == 2 %}selected{% endif %}>Tier 2</option>
+            <option value="3" {% if tier == 3 %}selected{% endif %}>Tier 3</option>
+          </select>
+          <button type="submit">Filter</button>
+        </form>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>URL</th>
+                <th>Tier</th>
+                <th>Company</th>
+                <th>Slack user</th>
+              </tr>
+            </thead>
+            <tbody id="historyBody">
+              {% if rows|length == 0 %}
+                <tr><td colspan="5" class="empty">No classifications yet.</td></tr>
+              {% endif %}
+              {% for r in rows %}
+                <tr>
+                  <td class="mono">{{ r.created_at_display }}</td>
+                  <td><a href="{{ r.url }}" target="_blank" rel="noreferrer">{{ r.url }}</a></td>
+                  <td class="mono">Tier {{ r.tier }}</td>
+                  <td>{{ r.company_name or "—" }}</td>
+                  <td class="mono">{{ r.triggered_by_name or r.triggered_by }}</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      const query = new URLSearchParams(window.location.search);
+      const q = query.get("q") || "";
+      const tier = query.get("tier") || "";
+      const body = document.getElementById("historyBody");
+      let lastId = null;
+
+      function esc(s) {
+        return String(s || "").replace(/[&<>"']/g, (c) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          "\"": "&quot;",
+          "'": "&#39;",
+        }[c]));
+      }
+
+      function renderRows(rows) {
+        if (!rows || rows.length === 0) {
+          body.innerHTML = '<tr><td colspan="5" class="empty">No classifications yet.</td></tr>';
+          return;
+        }
+        body.innerHTML = rows.map((r) => {
+          const user = r.triggered_by_name || r.triggered_by || "—";
+          const company = r.company_name || "—";
+          return `
+            <tr>
+              <td class="mono">${esc(r.created_at_display)}</td>
+              <td><a href="${esc(r.url)}" target="_blank" rel="noreferrer">${esc(r.url)}</a></td>
+              <td class="mono">Tier ${esc(r.tier)}</td>
+              <td>${esc(company)}</td>
+              <td class="mono">${esc(user)}</td>
+            </tr>
+          `;
+        }).join("");
+      }
+
+      async function poll() {
+        try {
+          const params = new URLSearchParams();
+          if (q) params.set("q", q);
+          if (tier) params.set("tier", tier);
+          const resp = await fetch(`/history.json?${params.toString()}`, { cache: "no-store" });
+          if (!resp.ok) return;
+          const data = await resp.json();
+          const rows = data.rows || [];
+          const newestId = rows.length ? rows[0].id : null;
+          if (newestId && newestId !== lastId) {
+            lastId = newestId;
+            renderRows(rows);
+          } else if (lastId === null && newestId) {
+            lastId = newestId;
+          }
+        } catch (e) {
+          // ignore transient errors
+        }
+      }
+
+      // Initial render sync (in case server-rendered rows are stale)
+      poll();
+      setInterval(poll, 4000);
+    </script>
+  </body>
+</html>
+

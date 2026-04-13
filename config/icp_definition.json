@@ -1,0 +1,17 @@
+{
+  "industry": "B2B SaaS",
+  "company_size_range": "100–1,000 employees",
+  "geography": "North America or Western Europe",
+  "keywords": [
+    "enterprise",
+    "pricing",
+    "case studies",
+    "security",
+    "SOC 2"
+  ],
+  "exclusion_keywords": [
+    "B2C",
+    "free shipping",
+    "add to cart"
+  ]
+}
