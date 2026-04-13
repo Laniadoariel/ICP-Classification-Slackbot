@@ -18,6 +18,7 @@ sys.path.insert(0, str(repo_root / "src"))
 from icp_bot.config import load_settings  # noqa: E402
 from icp_bot.db import (  # noqa: E402
     connect,
+    get_active_icp,
     init_db,
     keyword_pools,
     search_classifications,
@@ -114,8 +115,23 @@ def icp_form(request: Request):
     db_path = os.getenv("SQLITE_PATH", "data/icp.db")
     conn = connect(db_path)
     init_db(conn)
+    active_icp = get_active_icp(conn)
     pools = keyword_pools(conn)
     conn.close()
+
+    def format_israel(ts: str) -> str:
+        try:
+            s = (ts or "").replace("Z", "+00:00")
+            dt = datetime.fromisoformat(s)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            dt = dt.astimezone(timezone.utc) + timedelta(hours=3)
+            return dt.strftime("%d/%m/%Y %H:%M")
+        except Exception:
+            return ts
+
+    if active_icp and active_icp.get("updated_at"):
+        active_icp["updated_at_display"] = format_israel(str(active_icp.get("updated_at") or ""))
 
     # UX choice: this page is "create/update" but we keep the form empty so
     # users don't accidentally treat the current DB value as a suggested default.
@@ -133,6 +149,7 @@ def icp_form(request: Request):
         {
             "request": request,
             "icp": icp,
+            "active_icp": active_icp,
             "geo_options": GEO_OPTIONS,
             "keyword_pool": pools["keywords"],
             "exclusion_pool": pools["exclusion_keywords"],

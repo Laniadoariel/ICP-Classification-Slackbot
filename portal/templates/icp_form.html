@@ -21,7 +21,19 @@
 
       <main class="card">
         <h2>Active ICP definition</h2>
-        <p class="hint">This form opens empty by default.</p>
+        <p class="hint">This form opens empty by default. The bot uses the current active ICP stored in SQLite.</p>
+
+        <div class="hint" style="margin-top: 10px;">
+          <strong>Current active ICP (from DB):</strong>
+          <div class="mono" style="margin-top: 6px; line-height: 1.6;">
+            Industry: {{ (active_icp.industry if active_icp else "—") }}<br />
+            Company size: {{ (active_icp.company_size_range if active_icp else "—") }}<br />
+            Geography: {{ (active_icp.geography if active_icp else "—") }}<br />
+            Keywords: {{ (active_icp.keywords|join(", ") if active_icp and active_icp.keywords else "—") }}<br />
+            Exclusions: {{ (active_icp.exclusion_keywords|join(", ") if active_icp and active_icp.exclusion_keywords else "—") }}<br />
+            Updated at: <span class="mono">{{ (active_icp.updated_at_display if active_icp and active_icp.updated_at_display else (active_icp.updated_at if active_icp else "—")) }}</span>
+          </div>
+        </div>
 
         <form method="post" action="/icp" class="form">
           <div class="grid">

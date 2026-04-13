@@ -43,14 +43,24 @@ def _parse_range(s: str) -> tuple[int | None, int | None]:
     - "100-1000"
     - "100–1,000 employees"
     - "200 to 500"
+    - "1000+"
     Returns (min, max). If only one number is present, returns (0, n).
     """
     raw = (s or "").replace(",", "")
+    low_raw = raw.lower()
     nums = [int(x) for x in re.findall(r"\d+", raw)]
     if not nums:
         return (None, None)
     if len(nums) == 1:
-        return (0, nums[0])
+        n = nums[0]
+        # Common notation: "1000+" means at least 1000 employees.
+        if "+" in raw or "plus" in low_raw:
+            return (n, 10**9)
+        # "under 500" / "less than 500"
+        if "under" in low_raw or "less than" in low_raw or "below" in low_raw:
+            return (0, n)
+        # If we truly only have a single number, treat as an exact point.
+        return (n, n)
     return (min(nums[0], nums[1]), max(nums[0], nums[1]))
 
 
