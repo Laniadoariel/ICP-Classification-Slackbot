@@ -88,6 +88,7 @@ def main() -> None:
                     model=settings.openai_model,
                     icp_definition=icp_from_db,
                     scraped_text=scraped,
+                    source_url=base_url,
                 )
                 if not (result.company_name or "").strip() or (result.company_name or "").strip().lower() == "unknown":
                     # Some sites don't clearly state the company name. Use the

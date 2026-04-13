@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, List
 
 from openai import OpenAI
+import tldextract
 
 
 @dataclass(frozen=True)
@@ -19,6 +20,18 @@ class Classification:
     tech_stack_signal: str
     reasoning: List[str]
     criteria: Dict[str, bool]
+
+GEO_OPTIONS = [
+    "North America",
+    "Western Europe",
+    "Eastern Europe",
+    "LATAM",
+    "APAC",
+    "Middle East & Africa",
+    "Global",
+    "Other",
+    "Unknown",
+]
 
 
 def _norm(s: str) -> str:
@@ -131,6 +144,53 @@ def _compute_tier(criteria: Dict[str, bool]) -> int:
     return 3
 
 
+def _infer_geography(*, scraped_text: str, source_url: str | None = None) -> str:
+    """
+    Best-effort geography inference when the model returns "Unknown".
+    This is intentionally simple and explainable; it only needs to be "good enough"
+    to avoid returning Unknown when obvious signals exist (addresses, country names, ccTLDs).
+    """
+    t = _norm(scraped_text)
+
+    def has_any(words: list[str]) -> bool:
+        return any(_norm(w) in t for w in words)
+
+    # ccTLD heuristics (very rough, but useful when present)
+    if source_url:
+        ext = tldextract.extract(source_url)
+        suf = (ext.suffix or "").lower()  # e.g. "com.br", "de", "co.uk"
+        latam_suffixes = {"com.br", "br", "com.mx", "mx", "com.ar", "ar", "cl", "com.co", "co", "pe", "uy"}
+        na_suffixes = {"ca", "com.ca", "us"}
+        we_suffixes = {"de", "fr", "nl", "be", "es", "it", "ie", "pt", "se", "no", "dk", "fi", "ch", "at", "co.uk", "uk"}
+        ee_suffixes = {"pl", "cz", "sk", "hu", "ro", "bg", "lt", "lv", "ee", "si", "hr", "rs", "ua"}
+        if suf in latam_suffixes:
+            return "LATAM"
+        if suf in na_suffixes:
+            return "North America"
+        if suf in we_suffixes:
+            return "Western Europe"
+        if suf in ee_suffixes:
+            return "Eastern Europe"
+
+    # Text heuristics: look for explicit region/country/company-contact patterns
+    if has_any(["latin america", "latam", "mexico", "brazil", "argentina", "chile", "colombia", "peru"]):
+        return "LATAM"
+    if has_any(["united states", "usa", "u.s.", "canada", "mexico", "new york", "san francisco", "toronto", "vancouver"]):
+        return "North America"
+    if has_any(["europe", "eu", "united kingdom", "uk", "england", "germany", "france", "netherlands", "belgium", "spain", "italy", "sweden", "norway", "denmark", "finland", "switzerland", "austria", "ireland"]):
+        return "Western Europe"
+    if has_any(["poland", "czech", "slovakia", "hungary", "romania", "bulgaria", "lithuania", "latvia", "estonia", "serbia", "croatia", "ukraine"]):
+        return "Eastern Europe"
+    if has_any(["apac", "asia pacific", "singapore", "australia", "new zealand", "japan", "korea", "india"]):
+        return "APAC"
+    if has_any(["middle east", "africa", "uae", "dubai", "saudi", "qatar", "south africa"]):
+        return "Middle East & Africa"
+    if has_any(["global", "worldwide", "all regions", "international"]):
+        return "Global"
+
+    return "Unknown"
+
+
 def _build_prompt(icp_definition: Dict[str, Any], scraped_text: str) -> tuple[str, str]:
     system = (
         "You are an ICP (Ideal Customer Profile) classifier. "
@@ -149,7 +209,7 @@ def _build_prompt(icp_definition: Dict[str, Any], scraped_text: str) -> tuple[st
         '  "company_name": "string",\n'
         '  "industry": "string (best guess, or \\"Unknown\\")",\n'
         '  "company_size": "string (best guess, or \\"Unknown\\")",\n'
-        '  "geography": "string (best guess, or \\"Unknown\\")",\n'
+        f'  "geography": "one of {GEO_OPTIONS} (best guess, or \\"Unknown\\")",\n'
         '  "buying_signals": ["short signal", "..."],\n'
         '  "tech_stack_signal": "string (e.g., \\"Salesforce\\", \\"HubSpot\\", \\"Not detected\\")",\n'
         '  "reasoning": ["bullet", "..."],\n'
@@ -179,6 +239,7 @@ def classify_company(
     model: str,
     icp_definition: Dict[str, Any],
     scraped_text: str,
+    source_url: str | None = None,
 ) -> Classification:
     client = OpenAI(api_key=openai_api_key)
     system, user = _build_prompt(icp_definition, scraped_text)
@@ -205,6 +266,8 @@ def classify_company(
     industry = str(data.get("industry") or "Unknown")
     company_size = str(data.get("company_size") or "Unknown")
     geography = str(data.get("geography") or "Unknown")
+    if _norm(geography) in {"unknown", "not sure", "n/a"}:
+        geography = _infer_geography(scraped_text=scraped_text, source_url=source_url)
     buying_signals = list(data.get("buying_signals") or [])
     tech_stack_signal = str(data.get("tech_stack_signal") or "Not detected")
     reasoning = list(data.get("reasoning") or [])
