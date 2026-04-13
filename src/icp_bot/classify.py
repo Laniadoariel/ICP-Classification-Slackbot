@@ -9,6 +9,10 @@ from openai import OpenAI
 import tldextract
 
 
+class LLMError(RuntimeError):
+    """Raised when the OpenAI call or JSON parsing fails."""
+
+
 @dataclass(frozen=True)
 class Classification:
     tier: int
@@ -279,19 +283,23 @@ def classify_company(
     client = OpenAI(api_key=openai_api_key)
     system, user = _build_prompt(icp_definition, scraped_text)
 
-    # Use Chat Completions with JSON response formatting for reliable parsing.
-    resp = client.chat.completions.create(
-        model=model,
-        response_format={"type": "json_object"},
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ],
-        temperature=0.2,
-    )
+    try:
+        # Use Chat Completions with JSON response formatting for reliable parsing.
+        resp = client.chat.completions.create(
+            model=model,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.2,
+        )
 
-    content = resp.choices[0].message.content or ""
-    data = json.loads(content)
+        content = resp.choices[0].message.content or ""
+        data = json.loads(content)
+    except Exception as e:
+        # Hide internal details from Slack output; log is handled in main.py.
+        raise LLMError("LLM failure") from e
 
     tier = int(data["tier"])
     if tier not in (1, 2, 3):

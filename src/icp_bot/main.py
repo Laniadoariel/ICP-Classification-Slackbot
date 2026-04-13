@@ -8,7 +8,7 @@ import tldextract
 from slack_bolt import App
 from slack_bolt.adapter.socket_mode import SocketModeHandler
 
-from .classify import classify_company
+from .classify import LLMError, classify_company
 from .config import load_settings
 from .db import connect, get_active_icp, init_db, log_classification, upsert_active_icp
 from .scrape import ScrapeError, scrape_site
@@ -145,17 +145,17 @@ def main() -> None:
             except Exception as e:
                 logger.error("Failure during classification: %s\n%s", e, traceback.format_exc())
                 message = str(e) or "Unknown error"
-                if "Error code: 429" in message or "insufficient_quota" in message:
+                if isinstance(e, LLMError) or "api.openai.com" in message.lower() or "openai" in message.lower():
                     say(
                         blocks=build_error_blocks(
-                            "LLM reasoning failed. Please try again.",
+                            "LLM failed to classify this website. Please try again.",
                             title="LLM Failure",
                         ),
                         thread_ts=thread_ts,
                     )
                     return
-                else:
-                    friendly = f"*Error*: {message}\n\nTry again, or use a different URL."
+
+                friendly = f"*Error*: {message}\n\nTry again, or use a different URL."
                 say(
                     blocks=build_error_blocks(
                         friendly
