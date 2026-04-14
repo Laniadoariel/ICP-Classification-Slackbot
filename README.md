@@ -23,6 +23,8 @@ cd "ICP-Classification-Slackbot"
 
 Option B: download ZIP from GitHub and extract it, then `cd` into the folder.
 
+- [Download ZIP (main)](https://github.com/Laniadoariel/ICP-Classification-Slackbot/archive/refs/heads/main.zip)
+
 ## Setup
 Install dependencies:
 
