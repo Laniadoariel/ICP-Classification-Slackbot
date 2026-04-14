@@ -129,7 +129,7 @@ What gets stored in SQLite:
 - Ensure `OPENAI_API_KEY` is set
 - Run `python run_bot.py`
 
-## GitHub Secrets (recommended)
+## GitHub Secrets
 If you run anything via **GitHub Actions** (CI, scheduled tests, deployments), store secrets in GitHub instead of committing them.
 
 In your GitHub repo:
@@ -164,7 +164,7 @@ env:
   - Stop portal + bot, delete `data/icp.db`, then restart the portal
 
 ## Known limitations (prompt injection)
-- The bot scrapes **untrusted website text** and sends it to an LLM. A malicious website can try to influence the model’s output (prompt injection).
+- The bot scrapes **untrusted website text** and sends it to an LLM. A malicious website can try to influence the model’s output.
 - The bot does **not** trust the model’s tier. Final tiering is computed **deterministically** from criteria matches.
 - Free-text fields (company name / reasoning / buying signals) are **sanitized after the LLM call** (trimmed: instruction-like content, URLs, and emails are dropped or replaced).
 - Treat LLM-generated text as **assistive** and review it before acting on it.
