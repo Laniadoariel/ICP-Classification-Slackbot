@@ -11,13 +11,13 @@ except ModuleNotFoundError:
     # Python 3.8 fallback
     from backports.zoneinfo import ZoneInfo  
 
-from fastapi import FastAPI, Form, Request  # type: ignore[attr-defined]
-from fastapi.responses import HTMLResponse, RedirectResponse  # type: ignore[attr-defined]
-from fastapi.staticfiles import StaticFiles  # type: ignore[attr-defined]
-from fastapi.templating import Jinja2Templates  # type: ignore[attr-defined]
+from fastapi import FastAPI, Form, Request  
+from fastapi.responses import HTMLResponse, RedirectResponse  
+from fastapi.staticfiles import StaticFiles  
+from fastapi.templating import Jinja2Templates  
 
-from icp_bot.config import load_settings  # noqa: E402
-from icp_bot.db import (  # noqa: E402
+from icp_bot.config import load_settings  
+from icp_bot.db import (  
     connect,
     get_active_icp,
     init_db,
@@ -31,8 +31,7 @@ ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
 
 def format_israel(ts: str) -> str:
     """
-    Convert an ISO8601 timestamp (stored as UTC) to Israel local time, including DST.
-    Returns `ts` unchanged on parse errors.
+    Converting timestamp to Israel local time.
     """
     try:
         s = (ts or "").replace("Z", "+00:00")

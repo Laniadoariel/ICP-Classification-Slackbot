@@ -23,7 +23,7 @@ cd "ICP-Classification-Slackbot"
 
 Option B: download ZIP from GitHub and extract it, then `cd` into the folder.
 
-- [Download ZIP (main)](https://github.com/Laniadoariel/ICP-Classification-Slackbot/archive/refs/heads/main.zip)
+- [Download ZIP](https://github.com/Laniadoariel/ICP-Classification-Slackbot/archive/refs/heads/main.zip)
 
 ## Setup
 Install dependencies:
@@ -52,6 +52,8 @@ First steps :
 - Set the required environment variables
 - Run the bot and/or the portal
 
+---
+
 ### Windows (powershell)
 Set the variables in the same terminal session where you run the bot:
 
@@ -63,7 +65,7 @@ $env:OPENAI_MODEL="gpt-4o"
 $env:SQLITE_PATH="data/icp.db"
 ```
 
-Run the bot:
+Run the bot (in the terminal):
 
 ```powershell
 python run_bot.py
