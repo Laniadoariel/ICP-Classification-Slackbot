@@ -44,8 +44,16 @@ Notes:
 - **`SEED_ICP_ON_STARTUP`**: (optional) `true` to seed the DB with `config/icp_definition.json` when empty
 - **`ICP_DEFINITION_JSON`**: (optional) JSON string override for ICP 
 
-## Set environment variables locally (Windows PowerShell)
-Set the variables in the same terminal session where you run the bot.
+## Running locally (Windows + macOS)
+
+First steps :
+- Open a terminal in the project folder
+- Install dependencies: `python -m pip install -e ".[dev]"`
+- Set the required environment variables
+- Run the bot and/or the portal
+
+### Windows (powershell)
+Set the variables in the same terminal session where you run the bot:
 
 ```powershell
 $env:SLACK_BOT_TOKEN="xoxb-..."
@@ -55,27 +63,53 @@ $env:OPENAI_MODEL="gpt-4o"
 $env:SQLITE_PATH="data/icp.db"
 ```
 
-Then run the bot:
+Run the bot:
 
 ```powershell
 python run_bot.py
 ```
 
-## Run the bot
+Run the portal (in a second terminal):
+
+```powershell
+python -m uvicorn portal.app:app --host 127.0.0.1 --port 3000
+```
+
+Open:
+- `http://127.0.0.1:3000/` 
+
+---
+
+### macOS (Terminal: zsh/bash)
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -U pip
+python -m pip install -e ".[dev]"
+```
+
+Set environment variables (same terminal session):
+
+```bash
+export SLACK_BOT_TOKEN="xoxb-..."
+export SLACK_APP_TOKEN="xapp-..."
+export OPENAI_API_KEY="sk-..."
+export OPENAI_MODEL="gpt-4o"
+export SQLITE_PATH="data/icp.db"
+```
+
+Run the bot:
 
 ```bash
 python run_bot.py
 ```
 
-## Run the ICP portal (localhost:3000)
+Run the portal (in a second terminal):
 
 ```bash
-python -m uvicorn portal.app:app --host 127.0.0.1 --port 3000 --reload
+python -m uvicorn portal.app:app --host 127.0.0.1 --port 3000
 ```
-
-Open:
-- `http://127.0.0.1:3000/` (ICP form)
-- `http://127.0.0.1:3000/history` (searchable history; auto-refresh)
 
 What gets stored in SQLite:
 - **Active ICP definition**: stored in `icp_definition`
