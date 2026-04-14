@@ -5,19 +5,33 @@ Slack bot that classifies a company into **Tier 1 / Tier 2 / Tier 3** when menti
 Includes a small local portal (FastAPI + SQLite) to manage the active ICP definition and view/search classification history.
 
 ## Prereqs
-- Python 3.10+
+- Python 3.8+
+- Git (optional, to clone)
 - A Slack App configured for **Socket Mode**
   - **Event Subscriptions**: `app_mention`
   - **Bot token scopes**: `app_mentions:read`, `chat:write`, `channels:history`, `users:read`
   - **App-level token**: `connections:write` (Socket Mode)
 - OpenAI API key (for real LLM mode)
 
+## Download the project
+Option A (recommended): clone with Git:
+
+```bash
+git clone https://github.com/Laniadoariel/ICP-Classification-Slackbot.git
+cd "ICP-Classification-Slackbot"
+```
+
+Option B: download ZIP from GitHub and extract it, then `cd` into the folder.
+
 ## Setup
 Install dependencies:
 
 ```bash
-python -m pip install -r requirements.txt
+python -m pip install -e ".[dev]"
 ```
+
+Notes:
+- The portal displays timestamps in Israel local time (`Asia/Jerusalem`). On Python < 3.9 this requires `backports.zoneinfo` + `tzdata` (installed via `pip install -e ".[dev]"`).
 
 ## Environment variables
 - **`SLACK_BOT_TOKEN`**: Bot token (`xoxb-...`)
@@ -70,8 +84,8 @@ What gets stored in SQLite:
 - Invite the bot to a channel:
   - `/invite @icp-bot`
 - Mention it with a URL:
-  - `@icp-bot http://acme.com/`
   - `@icp-bot https://example.com`
+  - Only **public `https://`** URLs are supported (non-HTTPS and internal/private targets are blocked for safety).
 
 ### 2) Test the LLM
 - Ensure `OPENAI_API_KEY` is set
@@ -110,3 +124,9 @@ env:
   - Restart the portal (uvicorn) and refresh the page
 - **Make the ICP form empty again**
   - Stop portal + bot, delete `data/icp.db`, then restart the portal
+
+## Known limitations (prompt injection)
+- The bot scrapes **untrusted website text** and sends it to an LLM. A malicious website can try to influence the model’s output (prompt injection).
+- The bot does **not** trust the model’s tier. Final tiering is computed **deterministically** from criteria matches.
+- Free-text fields (company name / reasoning / buying signals) are **sanitized after the LLM call** (trimmed; instruction-like content, URLs, and emails are dropped or replaced), but this is not a perfect defense.
+- Treat LLM-generated text as **assistive** and review it before acting on it.

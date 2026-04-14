@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 
 from openai import OpenAI
 import tldextract
@@ -54,6 +54,146 @@ def _soft_contains(a: str, b: str) -> bool:
     return na in nb or nb in na
 
 
+_URL_LIKE_RE = re.compile(r"https?://", re.IGNORECASE)
+_EMAIL_LIKE_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
+
+# Common prompt-injection / instruction phrases that should never be displayed/stored as “business reasoning”.
+_INSTRUCTION_PHRASES = [
+    "ignore previous",
+    "ignore all previous",
+    "disregard previous",
+    "system prompt",
+    "developer message",
+    "you are chatgpt",
+    "as an ai",
+    "follow these instructions",
+    "do not follow",
+    "tools:",
+    "function call",
+    "BEGIN",
+    "END",
+]
+
+
+def _strip_control_chars(s: str) -> str:
+    # Keep printable characters + common whitespace, drop other control chars.
+    return "".join(ch for ch in (s or "") if ch == "\n" or ch == "\t" or ch >= " ")
+
+
+def _looks_instruction_like(s: str) -> bool:
+    """
+    Check if a string looks like an instruction.
+    - Return False if the string is empty
+    - Return True if the string contains a code block
+    - Return True if the string contains a URL or email address
+    - Return True if the string contains an instruction phrase
+    """
+    low = _norm(s)
+    if not low:
+        return False
+    if "```" in s:
+        return True
+    if _URL_LIKE_RE.search(s) or _EMAIL_LIKE_RE.search(s):
+        return True
+    return any(p.lower() in low for p in (p for p in _INSTRUCTION_PHRASES if p))
+
+
+def _fallback_company_name_from_url(source_url: str | None) -> str:
+    """
+    Fallback company name from URL.
+    - Return "Unknown" if the URL is None
+    - Return the domain name of the URL
+    - Return the domain name of the URL in title case
+    - Return the domain name of the URL in title case with hyphens and underscores replaced with spaces
+    """
+    if not source_url:
+        return "Unknown"
+    ext = tldextract.extract(source_url)
+    name = (ext.domain or "").strip()
+    if not name:
+        return "Unknown"
+    return name.replace("-", " ").replace("_", " ").title()
+
+
+def _sanitize_company_name(company_name: str, *, source_url: str | None) -> str:
+    """
+    Sanitize a company name to ensure it is valid and safe for Slack output.
+    - Drop empty strings
+    - Drop strings that are too long
+    - Drop strings that contain URLs or email addresses
+    - Drop strings that contain markdown formatting
+    - Return the fallback company name if the company name is invalid
+    """
+    s = _strip_control_chars(str(company_name or "")).strip()
+    if not s or _norm(s) in {"unknown", "not sure", "n/a"}:
+        return _fallback_company_name_from_url(source_url)
+
+    # Company name should be a short, single-line label.
+    s = " ".join(s.splitlines()).strip()
+    if len(s) > 80:
+        return _fallback_company_name_from_url(source_url)
+    if _looks_instruction_like(s):
+        return _fallback_company_name_from_url(source_url)
+
+    return s
+
+
+def _sanitize_bullets(items: Iterable[Any], *, max_items: int, max_item_len: int) -> List[str]:
+    """
+    Sanitize a list of bullets to ensure they are valid and safe for Slack output.
+    - Drop empty strings
+    - Drop strings that are too long
+    - Drop strings that contain control characters
+    - Drop strings that contain URLs or email addresses
+    - Drop strings that contain markdown formatting
+    """
+    out: List[str] = []
+    for it in (items or []):
+        s = _strip_control_chars(str(it or "")).strip()
+        if not s:
+            continue
+        s = " ".join(s.splitlines()).strip()
+        if not s:
+            continue
+        if _looks_instruction_like(s):
+            continue
+        if len(s) > max_item_len:
+            s = s[:max_item_len].rstrip()
+        out.append(s)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _detect_tech_stack_signal(scraped_text: str) -> str:
+    """
+    Best-effort deterministic tech-signal detection from scraped website text.
+    This reduces reliance on the LLM for a field that is easy to pattern-match.
+    """
+    t = _norm(scraped_text)
+    if not t:
+        return "Not detected"
+
+    # Ordered by specificity/commonality.
+    candidates: list[tuple[str, list[str]]] = [
+        ("Salesforce", ["salesforce", "sales cloud", "service cloud", "pardot"]),
+        ("HubSpot", ["hubspot"]),
+        ("Marketo", ["marketo"]),
+        ("Intercom", ["intercom"]),
+        ("Zendesk", ["zendesk"]),
+        ("Shopify", ["shopify"]),
+        ("Stripe", ["stripe"]),
+        ("Segment", ["segment.com", "segment ", "twilio segment"]),
+        ("Google Analytics", ["google analytics", "gtag", "google tag manager"]),
+    ]
+
+    for label, needles in candidates:
+        for n in needles:
+            if _norm(n) in t:
+                return label
+    return "Not detected"
+
+
 def _parse_range(s: str) -> tuple[int | None, int | None]:
     """
     Extracts a numeric range from strings like:
@@ -72,7 +212,8 @@ def _parse_range(s: str) -> tuple[int | None, int | None]:
         n = nums[0]
         # Common notation: "1000+" means at least 1000 employees.
         if "+" in raw or "plus" in low_raw:
-            return (n, 10**9)
+            # Treat "N+" as strictly greater than N (e.g., "1000+" => 1001+)
+            return (n + 1, 10**9)
         # "under 500" / "less than 500"
         if "under" in low_raw or "less than" in low_raw or "below" in low_raw:
             return (0, n)
@@ -261,7 +402,7 @@ def _build_prompt(icp_definition: Dict[str, Any], scraped_text: str) -> tuple[st
         "  }\n"
         "}\n"
         "Guidelines:\n"
-        # We still request a tier for completeness, but we compute the final
+        # request a tier for completeness, but compute the final
         # Tier 1/2/3 deterministically from the criteria matches to avoid
         # inconsistent booleans/tier combos from the model.
         "- If unsure, prefer tier 3.\n"
@@ -311,9 +452,14 @@ def classify_company(
     geography = str(data.get("geography") or "Unknown")
     if _norm(geography) in {"unknown", "not sure", "n/a"}:
         geography = _infer_geography(scraped_text=scraped_text, source_url=source_url)
-    buying_signals = list(data.get("buying_signals") or [])
+    company_name = _sanitize_company_name(company_name, source_url=source_url)
+
+    buying_signals = _sanitize_bullets(data.get("buying_signals") or [], max_items=8, max_item_len=140)
     tech_stack_signal = str(data.get("tech_stack_signal") or "Not detected")
-    reasoning = list(data.get("reasoning") or [])
+    # If the model failed to detect a tech signal, try a deterministic scan of the scraped text.
+    if _norm(tech_stack_signal) in {"not detected", "unknown", "n/a"}:
+        tech_stack_signal = _detect_tech_stack_signal(scraped_text)
+    reasoning = _sanitize_bullets(data.get("reasoning") or [], max_items=8, max_item_len=220)
     # We compute criteria deterministically from the saved ICP + extracted fields
     # (the model's internal boolean flags can be inconsistent).
     criteria = _compute_criteria(
@@ -332,9 +478,9 @@ def classify_company(
         industry=industry,
         company_size=company_size,
         geography=geography,
-        buying_signals=[str(x) for x in buying_signals][:8],
+        buying_signals=buying_signals,
         tech_stack_signal=tech_stack_signal,
-        reasoning=[str(x) for x in reasoning][:8],
+        reasoning=reasoning,
         criteria=criteria,
     )
 

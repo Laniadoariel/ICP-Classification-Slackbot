@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import tldextract
 from slack_bolt import App
@@ -79,54 +80,61 @@ def main() -> None:
                 base_url = normalize_base_url(url)
                 scraped = scrape_site(base_url).combined_text
                 conn2 = connect(settings.sqlite_path)
-                init_db(conn2)
-                # Read the active ICP at classification-time so portal changes
-                # take effect immediately without restarting the bot.
-                icp_from_db = get_active_icp(conn2) or settings.icp_definition
-                result = classify_company(
-                    openai_api_key=settings.openai_api_key,
-                    model=settings.openai_model,
-                    icp_definition=icp_from_db,
-                    scraped_text=scraped,
-                    source_url=base_url,
-                )
-                if not (result.company_name or "").strip() or (result.company_name or "").strip().lower() == "unknown":
-                    # Some sites don't clearly state the company name. Use the
-                    # domain as a consistent fallback for history + Slack output.
-                    result = result.__class__(  # type: ignore[misc]
-                        **{**result.__dict__, "company_name": _fallback_company_name_from_url(base_url)}
-                    )
-                user_id = str(event.get("user") or "unknown")
-                user_name = None
                 try:
-                    # Best-effort: requires the app to have the users:read scope.
-                    info = app.client.users_info(user=user_id)
-                    u = (info or {}).get("user") or {}
-                    profile = (u.get("profile") or {}) if isinstance(u, dict) else {}
-                    user_name = (
-                        profile.get("display_name")
-                        or profile.get("real_name")
-                        or u.get("name")
+                    # Read the active ICP at classification-time so portal changes
+                    # take effect immediately without restarting the bot.
+                    icp_from_db = get_active_icp(conn2) or settings.icp_definition
+                    result = classify_company(
+                        openai_api_key=settings.openai_api_key,
+                        model=settings.openai_model,
+                        icp_definition=icp_from_db,
+                        scraped_text=scraped,
+                        source_url=base_url,
                     )
-                except Exception:
+                    if not (result.company_name or "").strip() or (result.company_name or "").strip().lower() == "unknown":
+                        # Some sites don't clearly state the company name. Use the
+                        # domain as a consistent fallback for history + Slack output.
+                        result = replace(result, company_name=_fallback_company_name_from_url(base_url))
+                    user_id = str(event.get("user") or "unknown")
                     user_name = None
-                log_classification(
-                    conn2,
-                    url=base_url,
-                    tier=result.tier,
-                    company_name=result.company_name,
-                    triggered_by=user_id,
-                    triggered_by_name=str(user_name) if user_name else None,
-                    channel_id=str(event.get("channel") or "") or None,
-                    thread_ts=str(event.get("ts") or "") or None,
-                )
-                conn2.close()
-                say(blocks=build_result_blocks(result, base_url), thread_ts=thread_ts)
+                    try:
+                        # Best-effort: requires the app to have the users:read scope.
+                        info = app.client.users_info(user=user_id)
+                        u = (info or {}).get("user") or {}
+                        profile = (u.get("profile") or {}) if isinstance(u, dict) else {}
+                        user_name = (
+                            profile.get("display_name")
+                            or profile.get("real_name")
+                            or u.get("name")
+                        )
+                    except Exception:
+                        user_name = None
+                    log_classification(
+                        conn2,
+                        url=base_url,
+                        tier=result.tier,
+                        company_name=result.company_name,
+                        triggered_by=user_id,
+                        triggered_by_name=str(user_name) if user_name else None,
+                        channel_id=str(event.get("channel") or "") or None,
+                        thread_ts=str(event.get("ts") or "") or None,
+                    )
+                    say(blocks=build_result_blocks(result, base_url), thread_ts=thread_ts)
+                finally:
+                    conn2.close()
             except ScrapeError as e:
                 if e.kind == "unreachable":
                     friendly = (
                         "*Site unreachable*\n"
                         f"Couldn't reach `{url}` — please check the URL and try again."
+                    )
+                    say(blocks=build_error_blocks(friendly), thread_ts=thread_ts)
+                    return
+
+                if e.kind == "security_blocked":
+                    friendly = (
+                        "*URL blocked due to security measures*\n"
+                        "please use a `https://` URL"
                     )
                     say(blocks=build_error_blocks(friendly), thread_ts=thread_ts)
                     return

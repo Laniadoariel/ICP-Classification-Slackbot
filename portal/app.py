@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import os
-import sys
-from datetime import timedelta
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import List, Optional
+try:
+    # Python 3.9+
+    from zoneinfo import ZoneInfo
+except ModuleNotFoundError:  
+    # Python 3.8 fallback
+    from backports.zoneinfo import ZoneInfo  
 
 from fastapi import FastAPI, Form, Request  # type: ignore[attr-defined]
 from fastapi.responses import HTMLResponse, RedirectResponse  # type: ignore[attr-defined]
 from fastapi.staticfiles import StaticFiles  # type: ignore[attr-defined]
 from fastapi.templating import Jinja2Templates  # type: ignore[attr-defined]
-
-repo_root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(repo_root / "src"))
 
 from icp_bot.config import load_settings  # noqa: E402
 from icp_bot.db import (  # noqa: E402
@@ -24,6 +24,23 @@ from icp_bot.db import (  # noqa: E402
     search_classifications,
     upsert_active_icp,
 )
+
+ISRAEL_TZ = ZoneInfo("Asia/Jerusalem")
+
+
+def format_israel(ts: str) -> str:
+    """
+    Convert an ISO8601 timestamp (stored as UTC) to Israel local time, including DST.
+    Returns `ts` unchanged on parse errors.
+    """
+    try:
+        s = (ts or "").replace("Z", "+00:00")
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(ISRAEL_TZ).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return ts
 
 
 def _split_keywords(raw: str) -> List[str]:
@@ -114,21 +131,11 @@ def _startup() -> None:
 def icp_form(request: Request):
     db_path = os.getenv("SQLITE_PATH", "data/icp.db")
     conn = connect(db_path)
-    init_db(conn)
-    active_icp = get_active_icp(conn)
-    pools = keyword_pools(conn)
-    conn.close()
-
-    def format_israel(ts: str) -> str:
-        try:
-            s = (ts or "").replace("Z", "+00:00")
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            dt = dt.astimezone(timezone.utc) + timedelta(hours=3)
-            return dt.strftime("%d/%m/%Y %H:%M")
-        except Exception:
-            return ts
+    try:
+        active_icp = get_active_icp(conn)
+        pools = keyword_pools(conn)
+    finally:
+        conn.close()
 
     if active_icp and active_icp.get("updated_at"):
         active_icp["updated_at_display"] = format_israel(str(active_icp.get("updated_at") or ""))
@@ -167,23 +174,23 @@ def save_icp(
 ):
     db_path = os.getenv("SQLITE_PATH", "data/icp.db")
     conn = connect(db_path)
-    init_db(conn)
+    try:
+        kw = _split_keywords(keywords)
+        ex = _split_keywords(exclusion_keywords)
+        # Prevent overlap (case-insensitive). Exclusion keywords win.
+        ex_lower = {x.lower() for x in ex}
+        kw = [x for x in kw if x.lower() not in ex_lower]
 
-    kw = _split_keywords(keywords)
-    ex = _split_keywords(exclusion_keywords)
-    # Prevent overlap (case-insensitive). Exclusion keywords win.
-    ex_lower = {x.lower() for x in ex}
-    kw = [x for x in kw if x.lower() not in ex_lower]
-
-    upsert_active_icp(
-        conn,
-        industry=_normalize_industry(industry),
-        company_size_range=_normalize_company_size_range(company_size_range),
-        geography=geography,
-        keywords=kw,
-        exclusion_keywords=ex,
-    )
-    conn.close()
+        upsert_active_icp(
+            conn,
+            industry=_normalize_industry(industry),
+            company_size_range=_normalize_company_size_range(company_size_range),
+            geography=geography,
+            keywords=kw,
+            exclusion_keywords=ex,
+        )
+    finally:
+        conn.close()
     return RedirectResponse(url="/", status_code=303)
 
 
@@ -200,21 +207,10 @@ def history(request: Request, q: str = "", tier: Optional[str] = None):
 
     db_path = os.getenv("SQLITE_PATH", "data/icp.db")
     conn = connect(db_path)
-    init_db(conn)
-    rows = search_classifications(conn, q=q, tier=tier_int)
-    conn.close()
-
-    def format_israel(ts: str) -> str:
-        try:
-            s = (ts or "").replace("Z", "+00:00")
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            # Display in Israel time (UTC+3) per requirement.
-            dt = dt.astimezone(timezone.utc) + timedelta(hours=3)
-            return dt.strftime("%d/%m/%Y %H:%M")
-        except Exception:
-            return ts
+    try:
+        rows = search_classifications(conn, q=q, tier=tier_int)
+    finally:
+        conn.close()
 
     for r in rows:
         r["created_at_display"] = format_israel(str(r.get("created_at", "")))
@@ -241,20 +237,10 @@ def history_json(q: str = "", tier: Optional[str] = None, limit: int = 200):
 
     db_path = os.getenv("SQLITE_PATH", "data/icp.db")
     conn = connect(db_path)
-    init_db(conn)
-    rows = search_classifications(conn, q=q, tier=tier_int, limit=limit)
-    conn.close()
-
-    def format_israel(ts: str) -> str:
-        try:
-            s = (ts or "").replace("Z", "+00:00")
-            dt = datetime.fromisoformat(s)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            dt = dt.astimezone(timezone.utc) + timedelta(hours=3)
-            return dt.strftime("%d/%m/%Y %H:%M")
-        except Exception:
-            return ts
+    try:
+        rows = search_classifications(conn, q=q, tier=tier_int, limit=limit)
+    finally:
+        conn.close()
 
     out = []
     for r in rows:
